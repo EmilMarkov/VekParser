@@ -24,9 +24,9 @@ classifiers = [
 ]
 keywords = ["web", "parser", "scraping", "crawler"]
 dependencies = [
-    "requests>=2.25.0",
+    "requests>=2.32.3",
     "selectorlib>=0.16.0",
-    "parsel>=1.6.0",
+    "parsel>=1.7.0",
     "PyYAML>=5.4.0",
 ]
 requires-python = ">=3.9"
