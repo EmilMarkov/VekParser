@@ -9,7 +9,7 @@ from parsel import Selector
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
-class WebParser:
+class VekParser:
     """Универсальный парсер для сбора структурированных данных с веб-сайтов.
     
     Attributes:

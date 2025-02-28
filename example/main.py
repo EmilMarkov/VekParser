@@ -1,4 +1,4 @@
-from web_parser import WebParser
+from vek_parser import VekParser
 import logging
 
 if __name__ == "__main__":
@@ -16,7 +16,7 @@ if __name__ == "__main__":
     logger = logging.getLogger(__name__)
     logger.info("Запуск программы")
 
-    parser = WebParser(
+    parser = VekParser(
         config_path='config.yml',
         base_url='https://example.com',
         headers={
