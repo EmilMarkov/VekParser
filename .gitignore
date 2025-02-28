@@ -1,6 +1,6 @@
 *.json
 *.log
-*.yml
+config.yml
 
 # Python
 __pycache__/
