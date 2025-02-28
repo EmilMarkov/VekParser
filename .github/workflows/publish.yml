@@ -4,7 +4,6 @@ on:
   release:
     types: [published]
   
-  # Опционально: возможность ручного запуска
   workflow_dispatch:
 
 jobs:
