@@ -1,199 +1,196 @@
-# Полный гайд по конфигурации VekParser
+# Полное руководство по настройке VekParser
 
-## Базовые концепции
+## Основные концепции
 
-### Контекст (Context)
-- Словарь данных, передаваемый между шагами
+### Контекст выполнения
+- Динамический словарь данных, передаваемый между шагами
 - Формируется из:
-  - Результатов предыдущих шагов
-  - initial_context (передается при запуске)
-  - Ручных значений (через шаг `static`)
-- Используется через `{variable}` в URL и параметрах
+  - Результатов выполнения предыдущих шагов
+  - Начального контекста (initial_context)
+  - Статических значений (через шаг `static`)
+- Используется через шаблоны `{variable}` в URL и параметрах
 
 ### Жизненный цикл шага
 1. Получение входного контекста
-2. Выполнение логики шага
+2. Исполнение логики шага
 3. Сохранение результатов в новый контекст
-4. Передача данных в следующие шаги
+4. Передача обогащенного контекста последующим шагам
 
 ---
 
-## Структура конфига (config.yml)
+## Структура конфигурационного файла
 
-### Корневые элементы
+### Корневая структура
 ```yaml
-steps:           # Обязательно. Список всех шагов
-  - name: "..."  # Уникальное имя шага
-    type: "..."  # Тип шага (static/extract/list)
-    # ... параметры типа
+steps:            # Обязательный элемент. Список всех шагов
+  - name: "..."   # Уникальный идентификатор шага
+    type: "..."   # Тип обработки (static/extract/list)
+    # ... параметры конкретного типа
 ```
 
 ---
 
-## Типы шагов (подробно)
+## Типы шагов обработки
 
-### 1. static — статические данные
+### 1. static — статическое заполнение контекста
 ```yaml
-- name: setup_vars
+- name: init_vars
   type: static
-  values:          # Фиксированные значения
-    page: 1
-    lang: "en"
-  next_steps:      # Опционально. Что выполнить после
-    - step: "parse_page"  # Имя следующего шага
-      context_map:        # Маппинг данных в контекст
-        current_page: page  # current_page = context['page']
+  values:         # Фиксированные значения
+    items_per_page: 20
+    language: "ru"
+  next_steps:     # Опциональное продолжение цепочки
+    - step: "load_page"     # Имя следующего шага
+      context_map:         # Маппинг данных в контекст
+        page_num: items_per_page  # page_num = context['items_per_page']
 ```
 
-### 2. extract — парсинг страницы
+### 2. extract — извлечение данных со страницы
 ```yaml
-- name: parse_page
+- name: parse_products
   type: extract
-  url: "/products?page={current_page}"  # Используем контекст
-  data:              # Использует selectorlib синтаксис
-    product_list:
-      css: "div.product"
-      multiple: true
-      children:
+  url: "/catalog?page={page_num}"  # Подстановка из контекста
+  data:              # Конфигурация для selectorlib
+    products:        # Ключ для сохранения в контекст
+      css: "div.product-card"
+      multiple: true  # Сбор всех совпадений
+      children:       # Вложенные элементы
         title: "h2::text"
-        link: "a::attr(href)"
-  extract:           # Использует parsel синтаксис
-    pagination:
-      target: links  # Тип извлечения (links/data/html)
-      selector: "a.page-link"
-      attr: "data-page"  # Опциональный атрибут
+        price: ".price::attr(data-value)"
+        details_url: "a.more::attr(href)"
   next_steps:
     - step: "process_products"
       context_map:
-        items: product_list  # Передаем список продуктов
+        product_links: details_url  # Передача ссылок
 ```
 
-**Поддерживаемые target:**
-- `links`: список {url, text, [attr]}
-- `data`: словарь {field: value}
-- `html`: сырой HTML/текст
-
-### 3. list — обработка списка элементов
+### 3. list — параллельная обработка коллекции элементов
 ```yaml
 - name: process_products
   type: list
-  source: items     # Откуда брать элементы (из контекста)
-  output: products  # Куда сохранить результат
-  steps:            # Вложенные шаги для каждого элемента
-    - name: product_detail
+  source: product_links  # Источник данных из контекста
+  output: parsed_items   # Ключ для сохранения результатов
+  steps:                 # Цепочка обработки для каждого элемента
+    - name: product_page
       type: extract
-      url: "{link}"  # URL из элемента списка
-      extract:
-        specs:
-          target: data
-          selectors:
-            sku: "div#sku::text"
-            price: "span.price::text"
+      url: "{details_url}"  # URL из элемента коллекции
+      data:
+        specifications:
+          css: "div.specs-table"
+          children:
+            weight: "span.weight::text"
+            dimensions: "span.size::text"
 ```
 
 ---
 
-## Механика работы контекста
+## Механизм работы контекста
 
-### Пример потока данных
-1. Начальный контекст:
+### Пример передачи данных
+1. Исходный контекст:
    ```python
-   {'category': 'electronics'}
+   {'category_id': 42, 'region': 'eu'}
    ```
 2. После шага static:
    ```yaml
-   values: {page: 1}
+   values: {page: 3, currency: 'USD'}
    ```
-   Контекст → `{'category': 'electronics', 'page': 1}`
+   Контекст → `{'category_id': 42, 'region': 'eu', 'page': 3, 'currency': 'USD'}`
 
-3. В extract шаге:
+3. В шаге extract:
    ```yaml
-   url: "/catalog/{category}?page={page}"
+   url: "/v2/{category_id}?region={region}&p={page}"
    ```
-   URL → `/catalog/electronics?page=1`
+   Результат URL → `/v2/42?region=eu&p=3`
 
-4. Результат extract шага:
+4. Результат выполнения extract:
    ```python
-   {'products': [...]}
+   {'product_count': 15, 'items': [...]}
    ```
-   Новый контекст → `{..., 'products': [...]}`
+   Обновленный контекст → `{..., 'product_count': 15, 'items': [...]}`
 
 ---
 
-## Полный пример конфига
+## Полный пример конфигурации
 
 `config.yml`:
 ```yaml
 steps:
-  - name: init
+  - name: initialization
     type: static
     values:
-      base_category: "smartphones"
+      catalog_section: "electronics"
+      max_threads: 8
     next_steps:
-      - step: parse_category
+      - step: parse_main_category
 
-  - name: parse_category
+  - name: parse_main_category
     type: extract
-    url: "/shop/{base_category}"
-    extract:
+    url: "/categories/{catalog_section}"
+    data:
       subcategories:
-        target: links
-        selector: "nav.subcategories a"
-        attr: "data-id"
-      items:
-        target: links
-        selector: "div.product-card a.title"
+        css: "ul.subcategories li"
+        multiple: true
+        children:
+          name: "a::text"
+          url: "a::attr(href)"
+      products:
+        css: "div.product-tile"
+        multiple: true
+        children:
+          title: "h3::text"
+          product_url: "a::attr(href)"
     next_steps:
       - step: process_subcategories
         context_map:
-          subcats: subcategories
-      - step: process_items
+          subcategory_links: subcategories.url
+      - step: process_products
         context_map:
-          products: items
+          product_links: products.product_url
 
   - name: process_subcategories
     type: list
-    source: subcats
-    output: parsed_subcats
+    source: subcategory_links
+    output: parsed_subcategories
     steps:
-      - name: parse_subcategory
+      - name: subcategory_page
         type: extract
-        url: "{url}"
-        extract:
-          title: "h1::text"
-          description: "div.content::text"
+        url: "{item}"
+        data:
+          product_count: "span.count::text"
+          description: "div.category-description::text"
 
-  - name: process_items
+  - name: process_products
     type: list
-    source: products
+    source: product_links
     output: parsed_products
     steps:
-      - name: item_page
+      - name: product_details
         type: extract
-        url: "{url}"
-        extract:
-          details:
-            target: data
-            selectors:
-              brand: "meta[itemprop='brand']::attr(content)"
-              rating: "span.score::text"
+        url: "{item}"
+        data:
+          title: "h1.product-title::text"
+          price: "meta[itemprop=price]::attr(content)"
+          sku: "div.product-id::text"
 ```
 
 ---
 
-## Правила составления конфига
+## Правила построения конфигурации
 
-1. Порядок шагов в YAML не важен — выполнение определяется next_steps
-2. Всегда стартует первый шаг в списке `steps`
-3. Контекст автоматически обогащается:
-   - Результатами каждого шага
-   - Данными из context_map
-4. Для работы с динамическими URL всегда используйте `{variable}`
+1. **Порядок объявления шагов** не влияет на выполнение — последовательность определяется через `next_steps`
+2. **Точка входа** — всегда первый шаг в списке `steps`
+3. **Автоматическое обогащение контекста**:
+   - Результаты каждого шага добавляются в контекст
+   - `context_map` позволяет переносить данные между шагами
+4. **Динамические URL** должны использовать шаблоны `{variable_name}`
 
 ---
 
-## Обработка ошибок
+## Обработка ошибок и отладка
 
-- При ошибке в шаге: запись в лог, переход к следующему элементу
-- Для повтора запросов: увеличивайте `delay` в конструкторе
-- Для отладки: смотрите `parser.log` с уровнем DEBUG
+- **Ошибки выполнения шага**: Логируются с указанием шага, выполнение продолжается
+- **Рекомендации по запросам**:
+  - Увеличивайте `delay` при частых ошибках соединения
+  - Настраивайте `max_workers` в зависимости от нагрузки
+- **Файл лога**: `parser.log` с детальной информацией (уровень DEBUG)
