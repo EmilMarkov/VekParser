@@ -5,7 +5,6 @@ import time
 import json
 from urllib.parse import urljoin
 from selectorlib import Extractor
-from parsel import Selector
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 
@@ -158,12 +157,6 @@ class VekParser:
             extractor = self.extractor_cache[config_yaml]
             result.update(extractor.extract(response.text) or {})
 
-        if 'extract' in step_config:
-            selector = Selector(response.text)
-            for key, config in step_config['extract'].items():
-                handler = getattr(self, f"_extract_{config['target']}")
-                result[key] = handler(selector, config)
-
         return result
 
     def _process_list(self, step_config, context):
@@ -210,52 +203,6 @@ class VekParser:
         except Exception as e:
             self.logger.error(f"Item processing error: {str(e)}", exc_info=True)
             return []
-
-    def _extract_links(self, selector, config):
-        """
-        Извлекает ссылки из HTML.
-
-        Args:
-            selector (Selector): Parsel селектор
-            config (dict): Конфигурация извлечения
-        Returns:
-            list: Список извлеченных ссылок
-        """
-        elements = selector.css(config['selector'])
-        return [{
-            'url': el.css('::attr(href)').get(''),
-            'text': el.css('::text').get('').strip(),
-            **({config['attr']: el.css(f"::attr({config['attr']})").get('')} if 'attr' in config else {})
-        } for el in elements]
-
-    def _extract_data(self, selector, config):
-        """
-        Извлекает данные из HTML по CSS селекторам.
-
-        Args:
-            selector (Selector): Parsel селектор
-            config (dict): Конфигурация извлечения
-        Returns:
-            dict: Извлеченные данные
-        """
-        return {
-            field: selector.css(f"{css}::text").get('').strip()
-            for field, css in config['selectors'].items()
-        }
-
-    def _extract_html(self, selector, config):
-        """
-        Извлекает HTML контент.
-
-        Args:
-            selector (Selector): Parsel селектор
-            config (dict): Конфигурация извлечения
-        Returns:
-            str|list: Извлеченный HTML
-        """
-        if config.get('multiple', False):
-            return selector.css(config['selector']).getall()
-        return selector.css(config['selector']).get()
 
     def _resolve_url(self, template, context):
         """
