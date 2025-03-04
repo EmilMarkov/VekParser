@@ -1,0 +1,113 @@
+steps:
+  - name: init_pagination
+    type: static
+    values:
+      pages: ['1','2','3','4','5','6','7','8','9','10']
+    next_steps:
+      - step: process_pagination
+        context_map:
+          pages: pages
+
+  - name: process_pagination
+    type: list
+    source: pages
+    output: pages_data
+    steps:
+      - name: process_page
+        type: extract
+        url: "/sandbox/catalog/?page={text}"
+        data:
+          products:
+            css: "div.product-card"
+            multiple: true
+            children:
+              title:
+                css: "h6.card-title a"
+                type: Text
+              link:
+                css: "h6.card-title a"
+                type: Link
+              image:
+                css: "img.product-img"
+                type: Attribute
+                attribute: src
+        next_steps:
+          - step: process_products
+            context_map:
+              products: products
+              title: title
+              link: link
+              image: image
+
+  - name: process_products
+    type: list
+    source: products
+    output: products_data
+    handler_name: dict
+    steps:
+      - name: extract_product_data
+        type: extract
+        url: "{link}"
+        data:
+          price:
+            css: "#product_amount"
+            type: Text
+          sku:
+            css: "#sku"
+            type: Text
+          description:
+            css: "#description"
+            type: Text
+          width:
+            xpath: "//tr[1]//td[2]"
+            type: Text
+          height:
+            xpath: "//tr[2]//td[2]"
+            type: Text
+          depth:
+            xpath: "//tr[3]//td[2]"
+            type: Text
+        next_steps:
+          - step: calculate_dimensions
+            context_map:
+              title: title
+              link: link
+              image: image
+              price: price
+              sku: sku
+              description: description
+              width: width
+              height: height
+              depth: depth
+
+  - name: calculate_dimensions
+    type: transform
+    next_steps:
+      - step: save_product
+        context_map:
+          title: title
+          link: link
+          image: image
+          price: price
+          sku: sku
+          width: width
+          height: height
+          depth: depth
+          area: area
+          volume: volume
+          description: description
+
+  - name: save_product
+    type: save
+    fields:
+      - title
+      - link
+      - image
+      - price
+      - sku
+      - width
+      - height
+      - depth
+      - area
+      - volume
+      - description
