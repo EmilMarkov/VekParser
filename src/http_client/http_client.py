@@ -10,12 +10,14 @@ class HttpClient:
     """Обрабатывает HTTP-запросы с поддержкой JS-рендеринга и многопоточности."""
 
     def __init__(self, headers: Optional[Dict] = None, retries: int = 5,
-                 request_interval: float = 0.5, render_js: bool = False):
+                 request_interval: float = 0.5, render_js: bool = False,
+                 disable_logging: bool = False):
         self.logger = logging.getLogger(self.__class__.__name__)
-        self.logger.setLevel(logging.INFO)
-        handler = logging.StreamHandler()
-        handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
-        self.logger.addHandler(handler)
+        if not disable_logging:
+            self.logger.setLevel(logging.INFO)
+            handler = logging.StreamHandler()
+            handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+            self.logger.addHandler(handler)
 
         self.session = requests.Session()
         default_headers = {
