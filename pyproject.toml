@@ -1,6 +1,6 @@
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools>=42"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "vek-parser"
@@ -10,7 +10,7 @@ readme = "README.md"
 authors = [
     { name = "Emil Markov", email = "markovemil2@gmail.com" }
 ]
-license = "MIT"
+license = { text = "MIT" }
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
