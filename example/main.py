@@ -2,7 +2,7 @@ import re
 import logging
 from typing import Dict
 
-from web_parser import WebParser
+from vek_parser import WebParser
 
 
 class AreaCalculator:
