@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 from threading import Lock
 from typing import Optional, Dict, List, Callable, Any
-from http_client import HttpClient
+from .http_client import HttpClient
 
 
 logging.getLogger("urllib3.connectionpool").disabled = True
