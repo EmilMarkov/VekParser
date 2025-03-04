@@ -6,8 +6,9 @@ from selectorlib import Extractor
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 from threading import Lock
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Callable, Any
 from http_client import HttpClient
+
 
 class WebParser:
     """Парсит данные с веб-страниц используя конфигурацию YAML."""
@@ -37,7 +38,28 @@ class WebParser:
         self.collected_data = []
         self.data_lock = Lock()
         self.shutdown_event = threading.Event()
+
+        self.step_handlers = {
+            'static': self._process_static,
+            'extract': self._process_extract,
+            'list': self._process_list,
+            'save': self._process_save
+        }
+
+        self.item_handlers = {
+            'string': self._handle_string_item,
+            'link': self._handle_link_item
+        }
+
         self._validate_config()
+
+    def register_step_handler(self, step_type: str, handler: Callable[[Dict, Dict], Dict]):
+        """Регистрирует пользовательский обработчик для типа шага."""
+        self.step_handlers[step_type] = handler
+
+    def register_item_handler(self, item_type: str, handler: Callable[[Any, Dict], Dict]):
+        """Регистрирует обработчик для определенного типа элементов списка"""
+        self.item_handlers[item_type] = handler
 
     def run(self, initial_context: Optional[Dict] = None):
         """Запускает процесс парсинга."""
@@ -82,16 +104,20 @@ class WebParser:
         if self.shutdown_event.is_set():
             return None
 
-        processor = getattr(self, f'_process_{step_config["type"]}', None)
-        if not processor:
-            raise ValueError(f"Unsupported step type: {step_config['type']}")
+        step_type = step_config.get('type')
+        if not step_type:
+            raise ValueError("Step type not specified")
+
+        handler = self.step_handlers.get(step_type)
+        if not handler:
+            raise ValueError(f"Unsupported step type: {step_type}")
 
         try:
-            result = processor(step_config, context)
+            result = handler(step_config, context)
             self._handle_next_steps(step_config, context, result)
             return result
         except Exception as e:
-            self.logger.error(f"Step error: {str(e)}")
+            self.logger.error(f"Step error in '{step_type}': {str(e)}")
             return None
 
     def _process_static(self, step_config: Dict, context: Dict) -> Dict:
@@ -125,22 +151,59 @@ class WebParser:
                 self.logger.error(f"Item error: {str(e)}")
         return {step_config['output']: results}
 
-    def _process_item(self, step_config: Dict, item: Dict) -> List[Dict]:
+    def _process_item(self, step_config: Dict, item: Any) -> List[Dict]:
         """Обрабатывает элемент списка."""
         if self.shutdown_event.is_set():
             return []
-        if isinstance(item, str):
-            item = {'url': item}
-        resolved_url = self._resolve_url(item.get('url', ''), {})
-        context = {**item, 'url': resolved_url}
+
+        if 'item_handler' in step_config:
+            item_type = step_config.get('item_handler')
+        else:
+            item_type = self._detect_item_type(item)
+        handler = self.item_handlers.get(item_type)
+
+        if not handler:
+            raise ValueError(f"No handler for item type: {type(item).__name__}")
+
+        context = handler(item, step_config)
         results = []
+
         for nested_step in step_config['steps']:
             result = self._execute_step(nested_step, context)
             if result:
                 results.append(result)
-                with self.data_lock:
-                    self.collected_data.append(result)
+
         return results
+
+    def _detect_item_type(self, item: Any) -> str:
+        """Определяет тип элемента для выбора обработчика"""
+        if isinstance(item, str):
+            return 'link' if self._is_url(item) else 'string'
+        elif isinstance(item, dict):
+            return 'dict'
+        return 'custom'
+
+    def _is_url(self, value: str) -> bool:
+        """Проверяет является ли строка URL"""
+        return value.startswith(('http://', 'https://', '/'))
+
+    def _handle_string_item(self, item: str, config: Dict) -> Dict:
+        """Обработчик строковых элементов"""
+        return {'text': item}
+
+    def _handle_link_item(self, item: str, config: Dict) -> Dict:
+        """Обработчик URL-ссылок"""
+        base = config.get('base_url') or self.base_url
+        return {
+            'url': urljoin(base, item)
+        }
+
+    def _process_save(self, step_config: Dict, context: Dict) -> Dict:
+        """Сохраняет указанные поля из контекста в результат"""
+        data_to_save = {key: context.get(key) for key in step_config.get('fields', [])}
+        with self.data_lock:
+            self.collected_data.append(data_to_save)
+        return data_to_save
 
     def _resolve_url(self, template: str, context: Dict) -> str:
         """Генерирует полный URL."""
