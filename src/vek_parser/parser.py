@@ -14,6 +14,12 @@ from playwright.sync_api import sync_playwright
 
 
 class VekParser:
+    """
+    Класс для парсинга веб-сайтов с поддержкой многопоточности и JavaScript-рендеринга.
+    
+    Позволяет извлекать данные с веб-страниц на основе конфигурации в YAML формате.
+    Поддерживает параллельную обработку, управление сессиями и обработку JavaScript.
+    """
 
     def __init__(self, config_path: str,
                  base_url: Optional[str] = None,
@@ -22,6 +28,18 @@ class VekParser:
                  max_workers: int = 20,
                  retries: int = 5,
                  render_js: bool = False):
+        """
+        Инициализация парсера.
+
+        Args:
+            config_path: Путь к файлу конфигурации YAML
+            base_url: Базовый URL для относительных ссылок
+            headers: Пользовательские заголовки HTTP
+            request_interval: Интервал между запросами
+            max_workers: Максимальное количество потоков
+            retries: Количество попыток повторного запроса
+            render_js: Флаг для включения JavaScript-рендеринга
+        """
 
         self.logger = logging.getLogger(self.__class__.__name__)
         self.logger.setLevel(logging.INFO)
@@ -55,6 +73,12 @@ class VekParser:
         self._validate_config()
 
     def run(self, initial_context: Optional[Dict] = None):
+        """
+        Запускает процесс парсинга.
+
+        Args:
+            initial_context: Начальный контекст для парсинга
+        """
         try:
             context = initial_context or {}
             self._execute_step(self.config['steps'][0], context)
@@ -62,20 +86,34 @@ class VekParser:
             self.wait_completion()
 
     def save_data(self, filename: str):
+        """
+        Сохраняет собранные данные в JSON файл.
+
+        Args:
+            filename: Имя файла для сохранения
+        """
         with self.data_lock:
             with open(filename, 'w', encoding='utf-8') as f:
                 json.dump(self.collected_data, f, ensure_ascii=False, indent=4)
 
     def wait_completion(self):
+        """Ожидает завершения всех запущенных задач."""
         self.executor.shutdown(wait=True)
         self.shutdown_event.set()
 
     def close(self):
+        """Закрывает все ресурсы парсера."""
         self.wait_completion()
         self._close_browsers()
         self.session.close()
 
     def _get_browser(self):
+        """
+        Получает экземпляр браузера для текущего потока.
+        
+        Returns:
+            Экземпляр браузера Playwright
+        """
         if not hasattr(self.thread_local, "playwright"):
             self.thread_local.playwright = sync_playwright().start()
         if not hasattr(self.thread_local, "browser"):
@@ -92,12 +130,14 @@ class VekParser:
         return self.thread_local.browser
 
     def _close_browsers(self):
+        """Закрывает все экземпляры браузеров."""
         if hasattr(self.thread_local, "browser"):
             self.thread_local.browser.close()
         if hasattr(self.thread_local, "playwright"):
             self.thread_local.playwright.stop()
 
     def _validate_config(self):
+        """Проверяет корректность конфигурации."""
         required_fields = {
             'extract': ['url'],
             'list': ['source', 'steps']
@@ -111,6 +151,16 @@ class VekParser:
                     raise ValueError(f"Missing {field} in {step.get('name')}")
 
     def _execute_step(self, step_config: Dict, context: Dict) -> Optional[Dict]:
+        """
+        Выполняет шаг парсинга.
+
+        Args:
+            step_config: Конфигурация шага
+            context: Контекст выполнения
+
+        Returns:
+            Результат выполнения шага или None в случае ошибки
+        """
         if self.shutdown_event.is_set():
             return None
 
@@ -127,9 +177,29 @@ class VekParser:
             return None
 
     def _process_static(self, step_config: Dict, context: Dict) -> Dict:
+        """
+        Обрабатывает статический шаг.
+
+        Args:
+            step_config: Конфигурация шага
+            context: Контекст выполнения
+
+        Returns:
+            Статические значения из конфигурации
+        """
         return step_config.get('values', {}).copy()
 
     def _process_extract(self, step_config: Dict, context: Dict) -> Dict:
+        """
+        Извлекает данные со страницы.
+
+        Args:
+            step_config: Конфигурация шага
+            context: Контекст выполнения
+
+        Returns:
+            Извлеченные данные
+        """
         time.sleep(self.request_interval)
         url = self._resolve_url(step_config.get('url', ''), context)
         html = self._fetch_url(url)
@@ -145,6 +215,16 @@ class VekParser:
         return result
 
     def _process_list(self, step_config: Dict, context: Dict) -> Dict:
+        """
+        Обрабатывает список элементов.
+
+        Args:
+            step_config: Конфигурация шага
+            context: Контекст выполнения
+
+        Returns:
+            Результаты обработки списка
+        """
         items = context.get(step_config.get('source'), [])
         futures = [self.executor.submit(self._process_item, step_config, item) for item in items]
         results = []
@@ -156,6 +236,16 @@ class VekParser:
         return {step_config['output']: results}
 
     def _process_item(self, step_config: Dict, item: Dict) -> List[Dict]:
+        """
+        Обрабатывает отдельный элемент списка.
+
+        Args:
+            step_config: Конфигурация шага
+            item: Элемент для обработки
+
+        Returns:
+            Список результатов обработки элемента
+        """
         if self.shutdown_event.is_set():
             return []
         if isinstance(item, str):
@@ -172,12 +262,31 @@ class VekParser:
         return results
 
     def _resolve_url(self, template: str, context: Dict) -> str:
+        """
+        Разрешает URL с учетом контекста и базового URL.
+
+        Args:
+            template: Шаблон URL
+            context: Контекст для подстановки
+
+        Returns:
+            Полный URL
+        """
         url = template.format(**context)
         if not url.startswith(('http://', 'https://')) and self.base_url:
             return urljoin(self.base_url, url)
         return url
 
     def _fetch_url(self, url: str) -> Optional[str]:
+        """
+        Получает содержимое страницы.
+
+        Args:
+            url: URL страницы
+
+        Returns:
+            HTML содержимое или None в случае ошибки
+        """
         if self.render_js:
             try:
                 browser = self._get_browser()
@@ -202,6 +311,14 @@ class VekParser:
             return None
 
     def _handle_next_steps(self, step_config: Dict, context: Dict, result: Dict):
+        """
+        Обрабатывает следующие шаги.
+
+        Args:
+            step_config: Конфигурация текущего шага
+            context: Текущий контекст
+            result: Результат текущего шага
+        """
         combined_context = {**context, **result}
         for next_step in step_config.get('next_steps', []):
             if self.shutdown_event.is_set():
@@ -211,6 +328,18 @@ class VekParser:
             self._execute_step(step, mapped_context)
 
     def _get_step_by_name(self, name: str) -> Dict:
+        """
+        Находит шаг по имени.
+
+        Args:
+            name: Имя шага
+
+        Returns:
+            Конфигурация шага
+
+        Raises:
+            ValueError: Если шаг не найден
+        """
         for step in self.config['steps']:
             if step['name'] == name:
                 return step
