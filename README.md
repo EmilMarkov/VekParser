@@ -1,196 +1,207 @@
-# Полное руководство по настройке VekParser
+# VekParser: Расширяемый парсер для веб-сайтов
 
-## Основные концепции
+## Основные возможности
 
-### Контекст выполнения
-- Динамический словарь данных, передаваемый между шагами
-- Формируется из:
-  - Результатов выполнения предыдущих шагов
-  - Начального контекста (initial_context)
-  - Статических значений (через шаг `static`)
-- Используется через шаблоны `{variable}` в URL и параметрах
+- Многоступенчатая обработка данных через YAML-конфигурацию
+- Поддержка параллельного выполнения задач
+- Встроенные механизмы для работы с динамическим контентом (через Playwright)
+- Кастомные обработчики данных
+- Автоматическое сохранение результатов в JSON
 
-### Жизненный цикл шага
-1. Получение входного контекста
-2. Исполнение логики шага
-3. Сохранение результатов в новый контекст
-4. Передача обогащенного контекста последующим шагам
+## Ключевые концепции
 
----
+### Типы шагов обработки
 
-## Структура конфигурационного файла
+| Тип       | Назначение                          | Особенности                         |
+|-----------|-------------------------------------|-------------------------------------|
+| static    | Инициализация статических значений | Задает начальный контекст выполнения|
+| extract   | Извлечение данных со страницы       | Использует CSS/XPath селекторы      |
+| list      | Параллельная обработка коллекций    | Запускает вложенные цепочки шагов   |
+| save      | Финализация и сохранение результата | Экспорт в JSON-файл                |
 
-### Корневая структура
-```yaml
-steps:            # Обязательный элемент. Список всех шагов
-  - name: "..."   # Уникальный идентификатор шага
-    type: "..."   # Тип обработки (static/extract/list)
-    # ... параметры конкретного типа
-```
+### Жизненный цикл данных
+1. Инициализация контекста (static)
+2. Извлечение данных (extract)
+3. Обработка списка (list)
+4. Сохранение (save)
 
----
+## Полная структура конфигурации
 
-## Типы шагов обработки
-
-### 1. static — статическое заполнение контекста
-```yaml
-- name: init_vars
-  type: static
-  values:         # Фиксированные значения
-    items_per_page: 20
-    language: "ru"
-  next_steps:     # Опциональное продолжение цепочки
-    - step: "load_page"     # Имя следующего шага
-      context_map:         # Маппинг данных в контекст
-        page_num: items_per_page  # page_num = context['items_per_page']
-```
-
-### 2. extract — извлечение данных со страницы
-```yaml
-- name: parse_products
-  type: extract
-  url: "/catalog?page={page_num}"  # Подстановка из контекста
-  data:              # Конфигурация для selectorlib
-    products:        # Ключ для сохранения в контекст
-      css: "div.product-card"
-      multiple: true  # Сбор всех совпадений
-      children:       # Вложенные элементы
-        title: "h2::text"
-        price: ".price::attr(data-value)"
-        details_url: "a.more::attr(href)"
-  next_steps:
-    - step: "process_products"
-      context_map:
-        product_links: details_url  # Передача ссылок
-```
-
-### 3. list — параллельная обработка коллекции элементов
-```yaml
-- name: process_products
-  type: list
-  source: product_links  # Источник данных из контекста
-  output: parsed_items   # Ключ для сохранения результатов
-  steps:                 # Цепочка обработки для каждого элемента
-    - name: product_page
-      type: extract
-      url: "{details_url}"  # URL из элемента коллекции
-      data:
-        specifications:
-          css: "div.specs-table"
-          children:
-            weight: "span.weight::text"
-            dimensions: "span.size::text"
-```
-
----
-
-## Механизм работы контекста
-
-### Пример передачи данных
-1. Исходный контекст:
-   ```python
-   {'category_id': 42, 'region': 'eu'}
-   ```
-2. После шага static:
-   ```yaml
-   values: {page: 3, currency: 'USD'}
-   ```
-   Контекст → `{'category_id': 42, 'region': 'eu', 'page': 3, 'currency': 'USD'}`
-
-3. В шаге extract:
-   ```yaml
-   url: "/v2/{category_id}?region={region}&p={page}"
-   ```
-   Результат URL → `/v2/42?region=eu&p=3`
-
-4. Результат выполнения extract:
-   ```python
-   {'product_count': 15, 'items': [...]}
-   ```
-   Обновленный контекст → `{..., 'product_count': 15, 'items': [...]}`
-
----
-
-## Полный пример конфигурации
-
-`config.yml`:
 ```yaml
 steps:
-  - name: initialization
-    type: static
-    values:
-      catalog_section: "electronics"
-      max_threads: 8
+  - name: уникальное_имя_шага
+    type: [static|extract|list|save|свой тип]
+    
+    # Параметры для static
+    values: { ключ: значение }
+    
+    # Параметры для extract
+    url: "шаблон_URL"
+    data: { селекторы }
+    
+    # Параметры для list
+    source: "ключ_в_контексте"
+    output: "выходной_ключ"
+    handler_name: [string|link|dict|свой обработчик]
+    
+    # Общие параметры
     next_steps:
-      - step: parse_main_category
-
-  - name: parse_main_category
-    type: extract
-    url: "/categories/{catalog_section}"
-    data:
-      subcategories:
-        css: "ul.subcategories li"
-        multiple: true
-        children:
-          name: "a::text"
-          url: "a::attr(href)"
-      products:
-        css: "div.product-tile"
-        multiple: true
-        children:
-          title: "h3::text"
-          product_url: "a::attr(href)"
-    next_steps:
-      - step: process_subcategories
-        context_map:
-          subcategory_links: subcategories.url
-      - step: process_products
-        context_map:
-          product_links: products.product_url
-
-  - name: process_subcategories
-    type: list
-    source: subcategory_links
-    output: parsed_subcategories
-    steps:
-      - name: subcategory_page
-        type: extract
-        url: "{item}"
-        data:
-          product_count: "span.count::text"
-          description: "div.category-description::text"
-
-  - name: process_products
-    type: list
-    source: product_links
-    output: parsed_products
-    steps:
-      - name: product_details
-        type: extract
-        url: "{item}"
-        data:
-          title: "h1.product-title::text"
-          price: "meta[itemprop=price]::attr(content)"
-          sku: "div.product-id::text"
+      - step: "имя_следующего_шага"
+        context_map: { ключ: "значение_из_контекста" }
 ```
 
----
+## Расширенные возможности
 
-## Правила построения конфигурации
+### 1. Кастомные обработчики шагов
 
-1. **Порядок объявления шагов** не влияет на выполнение — последовательность определяется через `next_steps`
-2. **Точка входа** — всегда первый шаг в списке `steps`
-3. **Автоматическое обогащение контекста**:
-   - Результаты каждого шага добавляются в контекст
-   - `context_map` позволяет переносить данные между шагами
-4. **Динамические URL** должны использовать шаблоны `{variable_name}`
+Регистрация пользовательской логики:
+```python
+class DataProcessor:
+    @staticmethod
+    def process_data(step_config: Dict, context: Dict) -> Dict:
+        return {"processed": True}
 
----
+parser.register_step_handler('transform', DataProcessor.process_data)
+```
 
-## Обработка ошибок и отладка
+Пример использования в конфиге:
+```yaml
+- name: advanced_transform
+  type: transform
+  next_steps: [...]
+```
 
-- **Ошибки выполнения шага**: Логируются с указанием шага, выполнение продолжается
-- **Рекомендации по запросам**:
-  - Увеличивайте `delay` при частых ошибках соединения
-  - Настраивайте `max_workers` в зависимости от нагрузки
-- **Файл лога**: `parser.log` с детальной информацией (уровень DEBUG)
+### 2. Обработчики элементов списка
+
+Поддерживаемые типы:
+- `string` - текстовые элементы
+- `link` - URL-адреса
+
+Регистрация обработчика для словарей:
+```python
+parser.register_item_handler('dict', lambda item, _: item)
+```
+
+Конфигурация:
+```yaml
+- name: process_items
+  type: list
+  handler_name: dict
+  steps: [...]
+```
+
+### 3. Механизм сохранения данных
+
+Конфигурация шага сохранения:
+```yaml
+- name: save_results
+  type: save
+  fields:
+    - field1
+    - field2
+```
+
+Результат:
+```json
+[
+  {
+    "field1": "value1",
+    "field2": "value2"
+  },
+  {
+    "field1": "value3",
+    "field2": "value4"
+  }
+]
+```
+
+## Полный пример парсера
+
+### 1. Код обработчика
+
+```python
+class AreaCalculator:
+    @staticmethod
+    def calculate_dimensions(step_config: Dict, context: Dict) -> Dict:
+        # Логика вычислений
+        return {
+            'area': width * height,
+            'volume': width * height * depth
+        }
+```
+
+### 2. Конфигурация
+
+```yaml
+steps:
+  - name: product_processing
+    type: list
+    handler_name: dict
+    steps:
+      - name: extract_data
+        type: extract
+        url: "{link}"
+        data:
+          price: "#price::text"
+          dimensions: ".specs::text"
+        next_steps:
+          - step: calculate_metrics
+          
+      - name: calculate_metrics
+        type: transform
+        next_steps:
+          - step: save_product
+          
+  - name: save_product
+    type: save
+    fields:
+      - title
+      - price
+      - area
+      - volume
+```
+
+### 3. Инициализация парсера
+
+```python
+parser = WebParser(
+    config_path='config.yml',
+    base_url='https://example.com',
+    render_js=True
+)
+parser.register_step_handler('transform', AreaCalculator.calculate_dimensions)
+parser.register_item_handler('dict', lambda item, _: item)
+```
+
+## Отладка и мониторинг
+
+### Логирование
+Уровни логирования:
+- DEBUG: детальная информация о выполнении шагов
+- INFO: основные этапы работы
+- WARNING: проблемы с доступностью ресурсов
+- ERROR: критические ошибки выполнения
+
+Настройка:
+```python
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+```
+
+### Советы по оптимизации
+1. Настройка параллелизма:
+```python
+WebParser(max_workers=10)
+```
+
+2. Интервал запросов:
+```python
+HttpClient(request_interval=1.0)
+```
+
+3. JS-рендеринг:
+```python
+WebParser(render_js=True)
+```
